@@ -1,0 +1,213 @@
+---
+title: "Porównanie algorytmów analizy skupień"
+subtitle: "PDU 2018/19 - praca domowa nr 2"
+author: "Konrad Komisarczyk"
+output:
+  pdf_document:
+    fig_caption: yes
+    fig_crop: no
+    toc: true
+header-includes: 
+- \usepackage{graphicx}
+- \usepackage{float}
+- \usepackage{polski}
+---
+
+
+```{r setup, include = FALSE, cache = FALSE}
+library(knitr)
+opts_chunk$set(fig.path='figure/graphics-', 
+               cache.path='cache/graphics-', 
+               fig.align='center',
+               external=TRUE,
+               warning=FALSE,
+               fig.pos="H"
+)
+a4width <- 8.3
+a4height <- 11.7
+  
+library(dplyr)
+library(stringi)
+
+source("spectral.R")
+source("summary.R")
+
+options(stringsAsFactors = FALSE)
+options(width = 100)
+
+opts_chunk$set(echo=FALSE,
+               warning=FALSE,
+               fig.height = 3)
+```
+
+```{r loading_data, include = FALSE, cache = FALSE}
+indexes <- read.csv(file.path("out", "indexes.csv"))
+out_labels <- readRDS(file.path("out", "output_labels.rds"))
+```
+
+&nbsp;\newline
+&nbsp;\newline
+&nbsp;\newline
+&nbsp;\newline
+&nbsp;\newline
+&nbsp;\newline
+&nbsp;\newline
+&nbsp;\newline
+&nbsp;\newline
+
+
+W pracy zbadam jakość 4 różnych grup algorytmów analizy skupień:
+
+  * własnej implementacji algorytmu spektralnego (kod załączony w pliku `spectral.R`)
+  * Algorytmu *Genie* z pakietu `genie`.
+  * Metod hierarchicznych z bazowej funkcji `hclust`.
+  * Metody k-średnich z funkcji `kmeans`.
+  
+Zbadam jakość poszczególnych metod w zależności od udostępnianych przez funkcję parametrów tuningujących, czy różnych wariantów metody.
+Przyjrzę się wpływowi standaryzacji wejściowych danych za pomocą bazowej funkcji `scale` na jakość poszczególnych algorytmów.
+Ponadto porównam między sobą średnie wyniki różnych grup metod i wyniki najlepszych spośród wariantów każdej metody.
+
+Badania przeprowadzę na wszystkich dostarczonych zbiorach benchmarkowych i przygotowanych przeze mnie zbiorach danych poza `by_powiat.data`.
+
+Jakość algorytmów będę oceniał na podstawie oceny podobieństwa generowanych przez nie podziałów zbioru do danych podziałów referencyjnych przy użyciu indeksu Fowlkesa-Mallowsa (za pomocą funkcji `clues::adjustedRand` z parametrem `randMethod = "FM"`) i skorygowanego indeksu Randa (funkcja `mclust::adjustedRandIndex`).
+
+\newpage
+# 1. Porównanie różnych wariantów poszczególnych algorytmów analizy skupień
+
+## 1.1 Własna implementacja algorytmu spektralnego
+
+Porównałem jakość algorytmu dla kilku kolejnych małych wartości parametru `M` (3-9), oraz kilku wiekszych (16, 20, 32, 44) oznaczającego liczbę krawędzi do najbliższych sąsiadów punktu uwzględnianych w grafie sąsiedztwa używanym w algorytmie. 
+
+```{r, fig.height=2.8, fig.cap="Ocena średnich jakości wyników algorytmu spektralnego w zależności od parametu M. (Dla małych wartości parametru M.)"}
+spectral_small_args <- indexes %>%
+  filter(!(argument %in% c("12", "16", "20", "32", "44")))
+spectral_big_args <- indexes %>%
+  filter(argument %in% c("12", "16", "20", "32", "44"))
+alg_arguments_means_barplot(spectral_small_args, "spectral")
+```
+
+```{r, fig.height=2.5, fig.cap="Ocena średnich jakości wyników algorytmu spektralnego w zależności od parametu M. (Dla większych wartości parametru M.)"}
+alg_arguments_means_barplot(spectral_big_args, "spectral")
+```
+
+Spośród porównanych parametrów algorytm najlepsze wyniki osiąga dla parametru M = 8.
+
+\newpage
+### Wpływ standaryzacji
+
+W przypadku algorytmu spektralnego standaryzacja danych wejściowych ma mały, ale, w przeciwieństwie do wszystkich pozostałych badanych algorytmów, czasami pozytywny wpływ na jakość podziału.
+
+```{r, fig.cap="Średnia indeksów Randa dla własnej implementacji algorytmu spektralnego na nie standaryzowanych i standaryzowanych zbiorach, w zależności od wartości parametru M."}
+alg_scaling_arguments_means_barplot(indexes, "spectral")
+```
+
+```{r, fig.cap="Średnia indeksów Fowlkesa-Mallowsa dla własnej implementacji algorytmu spektralnego na nie standaryzowanych i standaryzowanych zbiorach, w zależności od wartości parametru M."}
+alg_scaling_arguments_means_barplot(indexes, "spectral", index = "AR")
+```
+
+
+\newpage
+## 1.2 Algorytm *Genie* z pakietu `genie`
+
+Zbadałem w jakość algorytmu w zależności od parametru `thresholdGini` (progu dla współczynnika Giniego). Współczynnik może przyjmować wartości rzeczywiste z przedziału `(0, 1]`. Domyślną wartością jest `0.3`.
+
+
+```{r, fig.cap="Ocena średnich jakości wyników algorytmu Genie w zależności od parametu thresholdGini."}
+alg_arguments_means_barplot(indexes, "genie")
+```
+
+Najlepsze wyniki algorytm osiąga w okolicach współczynnika równego `0.3` i gorsze im dalej od `0.3`. Oznacza to że jego domyślna wartość jest dobrze dobrana. 
+
+\newpage
+### Wpływ standaryzacji
+
+Standaryzacja danych wejściowych ma nieistotnie negatywny wpływ na jakość algorytmu.
+
+```{r, fig.cap="Średnia indeksów Randa dla algorytmu Genie na nie standaryzowanych i standaryzowanych zbiorach, w zależności od wartości parametru thresholdGini."}
+alg_scaling_arguments_means_barplot(indexes, "genie")
+```
+
+```{r, fig.cap="Średnia indeksów Fowlkesa-Mallowsa dla algorytmu Genie na nie standaryzowanych i standaryzowanych zbiorach, w zależności od wartości parametru thresholdGini."}
+alg_scaling_arguments_means_barplot(indexes, "genie", index = "AR")
+```
+
+
+
+\newpage
+## 1.3 Algorytmy hierarchiczne z funkcji `hclust()`
+
+Zbadałem jakość algorytmu w zależności od parametru `method`, czyli używanej przez algorytm metody aglomeracji. Zbadałem wszystkie udostępniane przez funkcję metody.
+
+```{r, fig.cap="Ocena średnich jakości wyników poszczególnych algorytmów hierarchicznych z funkcji hclust."}
+alg_arguments_means_barplot(indexes, "hclust", las = 2, mar = c(5, 3, 2, 2))
+```
+
+Różnice pomiędzy jakościami poszczególnych metod są niewielkie, ale najlepszą metodą okazuje się "ward.D", "ward.D2" jest niewiele słabsza. Najgorszą za to okazała się metoda "median".
+
+\newpage
+### Wpływ standaryzacji
+
+Standaryzacja danych wejściowych także w przypadku tego algorytmu, dla wszystkich jego wariantów, ma bardzo mały negatywny wpływ na jego jakość.
+
+```{r, fig.cap="Średnia indeksów Randa dla poszczególnych algorytmów z funkcji hclust na nie standaryzowanych i standaryzowanych zbiorach."}
+alg_scaling_arguments_means_barplot(indexes, "hclust", 
+                                    las = 2, mar = c(5, 3, 2, 2))
+```
+
+```{r, fig.cap="Średnia indeksów Fowlkesa-Mallowsa dla poszczególnych algorytmów z funkcji hclust na nie standaryzowanych i standaryzowanych zbiorach."}
+alg_scaling_arguments_means_barplot(indexes, "hclust", index = "AR",
+                                    las = 2, mar = c(5, 3, 2, 2))
+```
+
+
+
+
+\newpage
+## 1.4 metoda k-średnich `kmeans()`
+
+Zbadałem jakość metody w zależności od parametru `algorithm` udostępniającego 3 warianty.
+
+```{r, fig.cap="Ocena średnich jakości wyników poszczególnych wariantów algorytmu k-średnich z funkcji kmeans."}
+alg_arguments_means_barplot(indexes, "kmeans", las = 2, mar = c(7, 3, 2, 2))
+```
+
+Dla wszystkich algorytmów metoda osiąga bardzo bliskie wyniki.
+
+\newpage
+### Wpływ standaryzacji
+
+Tutaj także standaryzacja okazuje się mieć niski, ale nieistotny negatywny wpływ na jakość metody dla wszystkich wariantów.
+
+```{r, fig.width=5, fig.cap="Średnia indeksów Randa dla poszczególnych wariantów funkcji kmeans na nie standaryzowanych i standaryzowanych zbiorach."}
+alg_scaling_arguments_means_barplot(indexes, "kmeans", las = 1)
+```
+
+```{r, fig.width=5, fig.cap="Średnia indeksów Fowlkesa-Mallowsa dla poszczególnych wariantów funkcji kmeans na nie standaryzowanych i standaryzowanych zbiorach."}
+alg_scaling_arguments_means_barplot(indexes, "kmeans", las = 1, 
+                                    index = "AR")
+```
+
+
+\newpage
+# 2. Porównanie algorytmów
+
+## 2.1. Porównanie uśrednionych wyników
+
+```{r, fig.height=3, fig.cap="Porównanie średnich jakości wyników poszczególnych badanych metod."}
+all_alg_mean_means_barplot(indexes)
+```
+
+
+Algorytm *Genie* wyraźnie wyróżnia się pozytywnie na tle pozostałych. Algorytm spektralny okazał się najsłabszy, słabszy nawet od wykorzystywanego przez niego algorytmu k-średnich.
+
+
+\newpage
+## 2.2. Porównanie wyników najlepszych wariantów
+
+```{r, fig.height=3.6, fig.cap="Porównanie średnich jakości wyników najlepszych (o największej średniej z danego indeksu na wszystkich zbiorach) wariantów badanych metod."}
+all_alg_best_means_barplot(indexes)
+```
+
+Dla każdej z metod ten sam spośród badanych wariantów okazał się najlepszym pod względem zarówno indeksu Fowlkesa-Mallowsa, jak i Randa. 
+Słaby średni wynik algorytmu spektralnego w poprzednim porównaniu raczej nie wynika z doboru badanych parametrów M, ponieważ nawet dla dającego najlepsze wyniki parametru M = 8 nadal `spectral` otrzymuje najniższe indeksy.
+

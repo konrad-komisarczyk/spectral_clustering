@@ -1,0 +1,585 @@
+---
+title: "Zbiory benchmarkowe do analizy skupień"
+subtitle: "PDU 2018/19 - praca domowa nr 2"
+author: "Konrad Komisarczyk"
+output:
+  pdf_document:
+    fig_caption: yes
+    fig_crop: no
+header-includes: 
+- \usepackage{graphicx}
+- \usepackage{float}
+- \usepackage{polski}
+---
+
+
+
+```{r setup, include = FALSE, cache = FALSE}
+library(knitr)
+opts_chunk$set(fig.path='figure/graphics-', 
+               cache.path='cache/graphics-', 
+               fig.align='center',
+               external=TRUE,
+               echo=TRUE,
+               warning=FALSE,
+               fig.pos="H"
+)
+a4width <- 8.3
+a4height <- 11.7
+  
+library(dplyr)
+library(stringi)
+library(RColorBrewer)
+
+source("spectral.R")
+source("summary.R")
+
+options(stringsAsFactors = FALSE)
+options(width = 100)
+
+```
+
+```{r ploting_funs, include = FALSE, cache = FALSE}
+plot_set <- function(set, labels, ...) {
+  par(mar = c(2, 3, 2, 2))
+  
+  palette(brewer.pal(n = 8, name = "Dark2"))
+  
+  plot(set,
+     pch = 16,
+     col = adjustcolor(labels, alpha.f = 0.33), 
+     xaxt = "n", yaxt = "n", xlab = "", ylab = "", bty = "n", 
+     main = "",
+     ...)
+}
+
+plot_graph <- function(X, G) {
+  stopifnot(is.numeric(X) & ncol(X) == 2)
+  stopifnot(is.logical(G) & ncol(G) == nrow(G))
+  stopifnot(nrow(X) == nrow(G))
+  n <- nrow(X)
+  
+  plot(X, las=1, pch=16, asp=1, col="#0000FF80", 
+     xaxt = "n", yaxt = "n", xlab = "", ylab = "", bty = "n", 
+     main = "")
+  for (i in 1:n) {
+    for (j in 1:i) {
+      if (G[i, j]) {
+        lines(c(X[i, 1], X[j, 1]), c(X[i, 2], X[j, 2]), 
+              col="#00FF0080", lwd = 2)
+      }
+    }
+  }
+}
+```
+
+```{r loading_data, include = FALSE, cache = FALSE}
+indexes <- read.csv(file.path("out", "indexes.csv"))
+out_labels <- readRDS(file.path("out", "output_labels.rds"))
+
+indexes <- indexes %>% 
+  filter(alg == "spectral", scaled == FALSE) %>% 
+  filter(!(argument %in% c("12", "16", "20", "32", "44")))
+```
+
+
+
+
+# 1. Mieszkańcy miast w Polsce
+
+Zbiór reprezentuje uproszczone przybliżone rozmieszczenie ludności miejskiej w Polsce.
+
+Miasta przybliżane są kołami o polu równym obszarowi miasta.
+
+Mieszkańców miasta reprezentują punkty rozmieszczone według rozkładu normalnego o środku w środku koła przybliżającego miasto i odchyleniu standardowym równym promieniowi miasta. Jeden punkt odpowiada 4000 mieszkańcom.
+
+Punkty znajdują się na przybliżonym zrzutowaniu powierzchni ziemi na płaszczyznę euklidesową - 1 stopień szerokości geograficznej odpowiada `110.574 km`, a 1 stopień długości `111.32 * cos(0.01745329 * [szerokość geograficzna w stopniach])`.
+
+Zbiór składa się z 5796 punktów.
+
+Przygotowałem podział zbioru na 3 typy etykiet referencyjnych:
+
+* podział na 16 województw,
+* podział na 367 powiatów (nie uwzględniam go w badaniach),
+* podział na 940 miast (nie uwzględniam go w badaniach).
+
+
+```{r cities_image, echo = FALSE, cache = FALSE, fig.cap="Ilustracja zbioru z podziałem na województwa. Po lewej przeskalowane tak, żeby wyglądało, jak na mapie, a po prawej współrzędne punktów przechowywane w zbiorze.", fig.height=4, fig.width=6}
+cities <- matrix(scan("data/my/cities/by_voivodeship.data.gz"), 
+                      ncol = 2, byrow = TRUE)
+
+voiv_labels0 <- scan("data/my/cities/by_voivodeship.labels0.gz")
+
+plot_poland <- function(set, labels, ...) { 
+  par(mar = c(0, 0, 0, 0))
+  
+  palette(c(brewer.pal(n = 7, name = "Set3"), 
+            brewer.pal(n = 9, name = "Set1")))
+  
+  plot(set[, c(2, 1)],
+     pch = 16,
+     col = adjustcolor(labels, alpha.f = 0.5), 
+     xaxt = "n", yaxt = "n", xlab = "", ylab = "", bty = "n", 
+     main = "",
+     asp = 1.7)
+}
+
+
+par(mfrow = c(1, 2))
+
+# skalujemy, żeby wyglądało jak na mapie
+map <- t(cities %>% apply(1, function(x)
+  c(x[1] / cos(0.01745329 * x[2] / 110.574), x[2])))
+plot_poland(map, voiv_labels0)
+
+plot_poland(cities, voiv_labels0)
+```
+
+
+### Sposób przygotowania zbioru
+
+Dane zebrałem z artykułów na wikipedii 
+
+* Listy miast w polsce https://pl.wikipedia.org/wiki/Miasta_w_Polsce
+* Tabeli danych statystycznych o miastach w Polsce  https://pl.wikipedia.org/wiki/Dane_statystyczne_o_miastach_w_Polsce
+* Współrzędnych geograficznych miast z artykułu o każdym z miast
+
+Za pomocą skryptu `cities.py` w języku `python`:
+
+```{r, eval = FALSE}
+from bs4 import BeautifulSoup
+import requests
+
+html = requests.get("https://pl.wikipedia.org/wiki/Miasta_w_Polsce").content
+soup = BeautifulSoup(html)
+
+coords_file = open('coords', 'w+')
+
+for div in soup.find_all('div'):
+    if div.get("style") == '-moz-column-count:3; -webkit-column-count:3; column-count:3;':
+        for li in div.find_all('li'):
+            for a in li.find_all('a'):
+                nazwa = a.get("title")
+                link = a.get("href")
+                link_html = requests.get("https://pl.wikipedia.org" + link).content
+                link_soup = BeautifulSoup(link_html)
+                lat = []
+                lon = []
+                for span in link_soup.find_all('span'):
+                    if span.get("class") == ["latitude"]:
+                        lat.append(span.get_text())
+                    if span.get("class") == ["longitude"]:
+                        lon.append(span.get_text())
+                print(nazwa, lat[1], lon[1], sep=";", file=coords_file)
+
+link2 = "https://pl.wikipedia.org/wiki/Dane_statystyczne_o_miastach_w_Polsce"
+html2 = requests.get(link).content
+soup2 = BeautifulSoup(html2)
+
+population_file = open('population', 'w+')
+
+for tr in soup2.find_all('tr'):
+    for td in tr.find_all('td'):
+        print(td.get_text()[0:-1], file=population_file, end=';')
+    print('', file=population_file)
+```
+
+i podmieniając ',' na '.' narzędziem `sed` (`cities.sh`):
+
+```{bash, eval = FALSE}
+sed -i 's/,/./g' population coords
+```
+
+\newpage
+Przygotowałem ramki z danymi 
+
+* `population` - kolejne kolumny:
+    - nazwa miasta
+    - nazwa powiatu
+    - nazwa województwa
+    - powierzchnia (km<sup>2</sup>)
+    - liczba ludności
+    - gęstość zaludnienia
+* `coords` - kolejne kolumny:
+    - nazwa miasta
+    - szerokość geograficzna
+    - długość geograficzna
+ 
+Następnie z nich z użyciem skryptu `cities.R` przygotowałem 3 zbiory danych w odpowiednim formacie:
+
+* `by_voivodeship.data` i `by_voivodeship.labels0`
+* `by_powiat.data` i `by_powiat.labels0`
+* `by_city.data` i `by_city.labels0`
+
+Przygotowałem ramkę `cities2`, z wierszami reprezentującymi punkty w tych zbiorach danych:
+
+```{r, eval = FALSE}
+library(dplyr)
+#setwd(file.path("data", "my", "cities"))
+
+# wczytujemy dane zescrapowane pythonem
+coords <- read.table("coords", sep = ";", stringsAsFactors = FALSE)
+colnames(coords) <- c("C1", "C2", "C3")
+
+population <- read.table("population", sep = ";", stringsAsFactors = FALSE)
+
+# tabele zgadzają się wierszami, złączamy je kolumnami
+cities <- cbind(population, coords)
+
+
+voivodeships <- unique(cities$V3)
+powiats <- unique(cities$V2)
+n <- nrow(cities)
+
+cities <- cities %>% mutate(
+  # skalujemy współrzędne na powierzchnię euklidesową
+  y = C3 * 110.574, x = C2 * 111.32 * cos(0.01745329 * C3), 
+  # obliczamy promień koła przybliżającego miasto
+  area = V4, r = sqrt(area / pi),
+  # obliczamy liczbę punktów reprezentujących miasto
+  popul = V4 * V6, points = round(popul / 4000),
+  # kategoryzujemy miasta po województwie, powiecie i mieście
+  voiv = match(V3, voivodeships), 
+  powi = match(V2, powiats), 
+  city = 1:n)
+
+
+# tabela zawierająca wiersze odpowiadające naszym punktom - tyle kopii 
+# wierszy odpowiadających miastu z tabeli cities, ile punktów je reprezentuje
+cities2 <- cities %>% 
+  tidyr::uncount(points)
+
+
+# rozrzucamy punkty rozkładami normalnymi względem środków miast, które 
+# reprezentują i promieni tych miast
+n <- nrow(cities2)
+t <- runif(n, 0, 2*pi)
+a <- rnorm(n, 0, cities2$r)
+cities2$x <- sin(t) * a + cities2$x
+cities2$y <- cos(t) * a + cities2$y
+```
+
+i zapisałem dane do plików w odpowiednich formatach:
+
+```{r, eval = FALSE}
+cities_coords <- t(cbind(cities2$x, cities2$y))
+
+## podział na grupy po województwie
+write(cities_coords, "by_voivodeship.data", ncolumns = 2)
+write(cities2$voiv, "by_voivodeship.labels0", ncolumns = 1)
+
+## podział na grupy po powiecie
+write(cities_coords, "by_powiat.data", ncolumns = 2)
+write(cities2$powi, "by_powiat.labels0", ncolumns = 1)
+
+## podział na grupy po mieście
+write(cities_coords, "by_city.data", ncolumns = 2)
+write(cities2$city, "by_city.labels0", ncolumns = 1)
+```
+
+```{r, echo = FALSE, cache = TRUE}
+# cache = TRUE - ważne
+poland_spectral_labels <- spectral_clustering(cities, 16, 8)
+```
+
+```{r, echo = FALSE, cache = FALSE, fig.cap="Podział algorytmem spektralnym zbioru na 16 części dla parametru M=8", fig.height=4, fig.width=6}
+plot_poland(map, poland_spectral_labels)
+```
+
+
+
+
+\newpage
+## 1.1. Podział na województwa (`by_voivodeship`)
+
+```{r echo = FALSE, fig.height=2.2, fig.cap="Wartości indeksów Fowlkesa-Mallowsa i Randa dla algorytmu spektralnego na zbiorze dzielonym na województwa w zależności od parametru M."}
+by_voivodeship <- indexes %>%
+  filter(set == "by_voivodeship")
+
+alg_arguments_means_barplot(by_voivodeship, "spectral")
+```
+
+Algorytm zwraca dość dobre wyniki. Są nieco niższe niż średnie dla zbiorów benchmarkowych, ale lepsze niż najgorsze z pozostałych zbiorów benchmarkowych. Nie oczekiwałem od tego zbioru bardzo dobrej jakości wyników, oczekiwałem właśnie gdzieś mniej więcej takiej.
+Województwa w Polsce często mają w centrum duże miasto wojewódzkie i często miasta skupiają się wokół nich, czasami tworząc nawet duże aglomeracje miejskie, jak aglomeracja Warszawy, czy Trójmiasto.
+
+## 1.2. Podział na powiaty (`by_powiat`)
+
+```{r by_powiat_plot, echo = FALSE, fig.cap="Wartości indeksu Randa dla algorytmu spektralnego na zbiorze dzielonym na powiaty w zależności od parametru M.", cache = TRUE}
+## nie ma tego zbioru w wynikach badań, załączam więc zewnętrzny rysunek
+knitr::include_graphics("by_powiat_plot.pdf")
+```
+
+Algorytm zwraca bardzo słabe wyniki, czego oczekiwałem po tym podziale. W związku z tym, że nie jest on dobrym referencyjnym podziałem na etykiety, nie będę dołączał go do zbiorów benchmarkowych.
+
+
+
+\newpage
+# 2. Proste aglomeracje
+
+Zbiory zawierają kilka skupisk (aglomeracjii) punktów rozkładających się rozkładem normalnym względem pewnych środków.
+
+Zbiory generuję za pomocą funkcji `simple_agglomerations` przyjmującej jako parametry: 
+* liczbę punktów należących do aglomeracji
+* promienie aglomeracji
+* kwadrat wewnątrz którego będziemy losowali punkty zbioru
+
+Etykiety referencyjne zawierają dla każdego punktu informację o tym, do której aglomeracji należy.
+
+Funkcja losuje najpierw środki aglomeracji, a następnie losuje należące do nich punkty według rozkładu normalnego o odchyleniu równym promieniowi aglomeracji.
+
+
+```{r simple_agglomerations}
+## n_points - wektor z liczbą punktów w kolejnych aglomeracjach
+## radius - promienie kolejnych aglomeracji
+## lim - bok kwadratu, na którym umieszczone są środki aglomeracji
+simple_agglomerations <- function(n_points, radius, lim) {
+  n_aggls <- length(n_points)
+  
+  agglomeration <- function(center, n, radius) {
+    rnorm(n, mean = center, sd = radius)
+  }
+  
+  centers_x <- runif(n_aggls, min = 0, max = lim)
+  centers_y <- runif(n_aggls, min = 0, max = lim)
+  
+  X <- matrix(numeric(0), ncol = 2)
+  labels <- numeric(0)
+  for (i in 1:n_aggls) {
+    X <- rbind(X, (cbind(agglomeration(centers_x[i], n_points[i], 
+                                       radius[i]), 
+                         agglomeration(centers_y[i], n_points[i], 
+                                       radius[i]))))
+    labels <- c(labels, rep(i, n_points[i]))
+  }
+  
+  return(list(coords = X, labels = labels))
+}
+```
+
+
+Przygotowałem trzy warianty zbioru:
+
+
+\newpage
+## 2.1. `simple_agglomerations1`
+
+Zbiór składa się z 1347 punktów rozmieszczonych w 5 aglomeracjach.
+
+```{r}
+set.seed(1234)
+n <- 5
+set1 <- simple_agglomerations(n_points = runif(n, 100, 400),
+                              lim = 400, radius = runif(n, 20, 36))
+```
+
+
+
+```{r echo = FALSE, fig.height=3, fig.cap="Referencyjny podział zbioru i podział zbioru algorytmem spektralnym dla parametru M=3"}
+simple_agglomerations1_df <- indexes %>% 
+  filter(set == "simple_agglomerations1")
+
+# best <- simple_agglomerations1_df %>% 
+#   summarise(nr = nr[which.max(AR)], max(AR), argument[which.max(AR)])
+# best
+# nrow(set1$coords)
+
+par(mfrow = c(1, 2))
+plot_set(set1$coords, set1$labels)
+plot_set(set1$coords, spectral_clustering(set1$coords, 5, 3))
+```
+
+```{r echo = FALSE, fig.height=3, fig.cap='Wartości indeksów Fowlkesa-Mallowsa i Randa dla algorytmu spektralnego na zbiorze simple-agglomerations1 w zależności od parametru M.'}
+alg_arguments_means_barplot(simple_agglomerations1_df, "spectral", 
+                            leg = FALSE)
+```
+
+
+\newpage
+## 2.2. `simple_agglomerations2`
+
+Zbiór składa się z 1184 punktów rozmieszczonych w 3 aglomeracjach.
+
+```{r}
+set.seed(7312)
+n <- 3
+set2 <- simple_agglomerations(n_points = runif(n, 300, 600),
+                              lim = 300, radius = runif(n, 30, 50))
+```
+
+```{r echo = FALSE, fig.height=3, fig.cap="Referencyjny podział zbioru i podział zbioru algorytmem spektralnym dla parametru M=9"}
+simple_agglomerations2_df <- indexes %>% 
+  filter(set == "simple_agglomerations2")
+
+# best <- simple_agglomerations2_df %>%
+#   summarise(nr = nr[which.max(AR)], max(AR), argument[which.max(AR)])
+# best
+# nrow(set2$coords)
+
+par(mfrow = c(1, 2))
+plot_set(set2$coords, set2$labels)
+plot_set(set2$coords, spectral_clustering(set2$coords, 3, 9))
+```
+
+
+```{r echo = FALSE, fig.height=3, fig.cap="Wartości indeksów Fowlkesa-Mallowsa i Randa dla algorytmu spektralnego na zbiorze simple-agglomerations2 w zależności od parametru M."}
+alg_arguments_means_barplot(simple_agglomerations2_df, "spectral", 
+                            leg = FALSE)
+```
+
+
+\newpage
+## 2.3. `simple_agglomerations3`
+
+Zbiór składa się z 982 punktów rozmieszczonych w 8 aglomeracjach.
+
+```{r}
+set.seed(123)
+n <- 8
+set3 <- simple_agglomerations(n_points = runif(n, 10, 200),
+                              lim = 200, radius = rep(n, 13))
+```
+
+
+```{r echo = FALSE, fig.height=3, fig.cap="Referencyjny podział zbioru i podział zbioru algorytmem spektralnym dla parametru M=6"}
+simple_agglomerations3_df <- indexes %>% 
+  filter(set == "simple_agglomerations3")
+
+# best <- simple_agglomerations3_df %>%
+#   summarise(nr = nr[which.max(AR)], max(AR), argument[which.max(AR)])
+# best
+# nrow(set3$coords)
+
+par(mfrow = c(1, 2))
+plot_set(set3$coords, set3$labels)
+plot_set(set3$coords, spectral_clustering(set3$coords, 8, 6))
+```
+
+
+```{r echo = FALSE, fig.height=3, fig.cap="Wartości indeksów Fowlkesa-Mallowsa i Randa dla algorytmu spektralnego na zbiorze simple-agglomerations3 w zależności od parametru M."}
+alg_arguments_means_barplot(simple_agglomerations3_df, "spectral", 
+                            leg = FALSE)
+```
+
+
+
+
+\newpage
+# 3. Oliwki na pokrojonej pizzy
+
+Zbiory reprezentują oliwki na pokrojonej pizzy z odsuniętymi od siebie kawałkami.
+
+Punkty są równomiernie rozłożone na każdym kawałku. Kawałki są rozsunięte, czyli są pomiędzy nimi pasy, w których nie ma żadnych punktów.
+
+Zbiór generuje następująca funkcja sparametryzowana szerokością przerwy pomiędzy kawałkami i liczbą punktów w poszczególnych kawałkach:
+
+```{r}
+## sets - wektor z liczbą punktów należących do kolejnych kawałków pizzy
+## space - promień, o jaki odsunięte są kawałki od środka
+pizza <- function(sets, space) {
+  n <- sum(sets)
+  parts <- length(sets)
+  
+  # punkty należące do nr-tego kawałka
+  points_in_part <- function(n, nr, parts, space) {
+    # generujemy n punktów rozłożonych równomiernie na nr-tym kawałku pizzy
+    t <- runif(n, (nr-1)*2*pi/parts, nr*2*pi/parts)
+    a <- runif(n, 0, 1)
+    a <- acos(a)
+    x <- sin(t) * a
+    y <- cos(t) * a
+    
+    # odsuwamy kawałek od środka
+    v <- (nr - 0.5)*2*pi/parts
+    x <- x + sin(v) * space
+    y <- y + cos(v) * space
+    
+    return(cbind(x, y))
+  }
+  
+  X <- matrix(numeric(0), ncol = 2)
+  labels <- numeric(0)
+  for (i in 1:parts) {
+    p <- points_in_part(sets[i], i, parts, space)
+    X <- rbind(X, p)
+    labels <- c(labels, rep(i, sets[i]))
+  }
+  
+  return(list(coords = X, labels = labels))
+}
+```
+
+Przygotowałem dwa warianty zbioru:
+
+\newpage
+## 3.1. Mała pizza (4 kawałki)
+
+```{r}
+set.seed(1234)
+n <- 4
+sets <- runif(n, 100, 200)
+pitca1 <- pizza(sets, 0.15)
+```
+
+Zbiór składa się z 595 punktów.
+
+```{r echo = FALSE, fig.height=3, fig.cap="Referencyjny podział zbioru i podział zbioru algorytmem spektralnym dla parametru M=4"}
+pizza1_df <- indexes %>% 
+  filter(set == "pizza1")
+
+# best <- pizza1_df %>%
+#   summarise(nr = nr[which.max(AR)], max(AR), argument[which.max(AR)])
+# best
+# nrow(pitca1$coords)
+
+par(mfrow = c(1, 2))
+plot_set(pitca1$coords, pitca1$labels)
+plot_set(pitca1$coords, spectral_clustering(pitca1$coords, 4, 4))
+```
+
+```{r echo = FALSE, fig.height=3, fig.cap="Wartości indeksów Fowlkesa-Mallowsa i Randa dla algorytmu spektralnego na zbiorze pizza1 w zależności od parametru M."}
+alg_arguments_means_barplot(pizza1_df, "spectral", leg = FALSE)
+```
+
+
+\newpage
+## 3.2. Średnia pizza (6 kawałków)
+
+```{r}
+set.seed(7312)
+n <- 6
+sets <- runif(n, 50, 150)
+pitca2 <- pizza(sets, 0.3)
+```
+
+Zbiór zkłada się z 454 punktów.
+
+```{r echo = FALSE, fig.height=3, fig.cap="Referencyjny podział zbioru i podział zbioru algorytmem spektralnym dla parametru M=6"}
+pizza2_df <- indexes %>% 
+  filter(set == "pizza2")
+
+# best <- pizza2_df %>%
+#   summarise(nr = nr[which.max(AR)], max(AR), argument[which.max(AR)])
+# best
+# nrow(pitca2$coords)
+
+par(mfrow = c(1, 2))
+plot_set(pitca2$coords, pitca2$labels)
+plot_set(pitca2$coords, spectral_clustering(pitca2$coords, 6, 6))
+```
+
+```{r echo = FALSE, fig.height=3, fig.cap="Wartości indeksów Fowlkesa-Mallowsa i Randa dla algorytmu spektralnego na zbiorze pizza2 w zależności od parametru M."}
+alg_arguments_means_barplot(pizza2_df, "spectral", leg = FALSE)
+```
+
+\newpage
+# 4. Dodatek
+
+```{r echo = FALSE, fig.height=7, fig.cap="Rysunek przedstawiający graf 3 najbliższych sąsiadów na zbiorze pizza2"}
+plot_graph(pitca2$coords, Mnn_graph(Mnn(pitca2$coords, 3)))
+```
+
+\newpage
+
+```{r echo = FALSE, fig.height=7, fig.cap="Rysunek przedstawiający graf 7 najbliższych sąsiadów na zbiorze pizza2"}
+plot_graph(pitca2$coords, Mnn_graph(Mnn(pitca2$coords, 7)))
+```
